@@ -17,7 +17,11 @@ namespace Infrastructure.Persistence.Configurations {
                 .HasMaxLength(256);
             builder.Property(b => b.MinerNote)
                 .HasMaxLength(512);
-            
+
+            builder.Property(b => b.Data)
+                .IsRequired(false);
+
+
             builder.HasMany(b => b.Transactions)
                 .WithOne()
                 .HasForeignKey("block_hash")

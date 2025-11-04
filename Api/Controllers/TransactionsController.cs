@@ -17,9 +17,11 @@ namespace Api.Controllers {
         public async Task<IActionResult> AddTransaction([FromBody] Transaction tx) {
             if (tx == null)
                 return BadRequest(ApiResponse<string>.Failure("Transaction payload is required"));
+            // Trước kia là return BadRequest(...);
 
             await _ledgerService.AddTransactionAsync(tx);
             return Ok(ApiResponse<object>.Success(tx, "Transaction added to pending pool"));
+            // Trước kia là return Ok(tx);
         }
     }
 }

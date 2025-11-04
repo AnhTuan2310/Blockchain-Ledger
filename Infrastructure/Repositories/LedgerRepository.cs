@@ -1,7 +1,5 @@
-﻿using Application.DTOs;
-using Application.DTOs.Ledger;
+﻿using Application.DTOs.Ledger;
 using Application.IRepositories;
-using Application.IServices;
 using Application.Mappings;
 using Domain.Entities;
 using Infrastructure.Persistence;
@@ -31,7 +29,6 @@ namespace Infrastructure.Repositories {
         }
 
         //Snapshot
-
         // Tao snapshot va return SnapshotDTO
         public async Task<SnapshotDTO> CreateSnapshotAsync(string description, List<Block> chain, List<Transaction> mempool) {
             var snapId = Guid.NewGuid();
@@ -68,7 +65,6 @@ namespace Infrastructure.Repositories {
             var dto = JsonSerializer.Deserialize<SnapshotDTO>(snap.ChainStateJson);
             return dto;
         }
-
         //Thay the trang thai cua db bang snapshot
         public async Task RollbackToSnapshotAsync(SnapshotDTO snapshotDto) {
             if (snapshotDto == null) throw new ArgumentNullException(nameof(snapshotDto));
@@ -90,7 +86,6 @@ namespace Infrastructure.Repositories {
 
             await _db.SaveChangesAsync();
         }
-
         public async Task<List<SnapshotDTO>> GetSnapshotsAsync() {
             var snaps = await _db.MemoryRecords
                 .OrderByDescending(m => m.SnapshotTime)

@@ -19,7 +19,7 @@ public class ExceptionMiddleware {
             context.Response.ContentType = "application/json";
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
 
-            // Prod mode: không show stack trace
+            // Phia client không show stack trace
             var message = _env.IsDevelopment()
                 ? $"{ex.Message} | {ex.StackTrace}"
                 : ex.Message;

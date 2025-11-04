@@ -49,7 +49,8 @@ namespace Application.Services {
                 PreviousHash = previous.Hash,
                 Timestamp = DateTime.Now,
                 MinerNote = minerNote,
-                Transactions = pending
+                Transactions = pending,
+                Data = $"Block with {pending.Count} transactions"
             };
 
             block.Hash = BlockchainState.ComputeHashForBlock(block);
