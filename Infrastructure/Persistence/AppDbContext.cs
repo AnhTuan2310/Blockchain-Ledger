@@ -16,8 +16,6 @@ namespace Infrastructure.Persistence {
             //modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppContext).Assembly);
             modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
             modelBuilder.UseSnakeCaseConvention();
-
-
         }
     }
 }
