@@ -1,5 +1,7 @@
 ﻿using Application.DTOs;
-using Application.DTOs.Ledger;
+using Application.DTOs.Blocks;
+using Application.DTOs.Transactions;
+using Application.DTOs.Snapshot;
 using Application.IRepositories;
 using Application.IServices;
 using Application.Mappings;
@@ -7,50 +9,41 @@ using Application.State;
 using Domain.Entities;
 
 namespace Application.Services {
-    public class LedgerService : ILedgerService, ILedgerQueryService {
+    public class LedgerService : ILedgerService {
         private readonly BlockchainState _state;
         private readonly ILedgerRepository _repo;
-
         public LedgerService(BlockchainState state, ILedgerRepository repo) {
             _state = state;
             _repo = repo;
         }
 
-        // ================================
-        // COMMANDS (ILedgerService)
-        // ================================
-
-        public async Task AddTransactionAsync(Transaction tran) {
-            await Task.Yield(); // giữ async signature theo convention
-            _state.AddPendingTransaction(tran);
-        }
-
+        //Blocks
         public async Task<Block> MineBlockAsync(string minerNote) {
             var pending = _state.DrainPendingTransactions();
             if (pending.Count == 0)
                 throw new InvalidOperationException("No pending transactions to mine.");
 
-            var currentChain = _state.Blocks;
-
             Block previous;
-            if (currentChain.Count == 0) {
+
+            if (_state.Blocks.Count == 0) {
+                // Genesis block
                 previous = new Block {
                     Hash = "0",
-                    Timestamp = DateTime.Now,
-                    MinerNote = "GENESIS"
+                    MinerNote = "GENESIS",
+                    Timestamp = DateTime.UtcNow
                 };
+
                 _state.AddBlock(previous);
                 await _repo.AddBlockAsync(previous);
             } else {
-                previous = currentChain.Last();
+                previous = _state.Blocks.Last();
             }
 
             var block = new Block {
                 PreviousHash = previous.Hash,
-                Timestamp = DateTime.Now,
+                Timestamp = DateTime.UtcNow,
                 MinerNote = minerNote,
-                Transactions = pending,
-                Data = $"Block with {pending.Count} transactions"
+                Transactions = pending
             };
 
             block.Hash = BlockchainState.ComputeHashForBlock(block);
@@ -61,51 +54,6 @@ namespace Application.Services {
             return block;
         }
 
-        public async Task<SnapshotDTO> CreateSnapshotAsync(string description) {
-            var chain = _state.Blocks.ToList();
-            var mempool = _state.PendingTransactions.ToList();
-
-            var dto = await _repo.CreateSnapshotAsync(description, chain, mempool);
-            return dto;
-        }
-
-        public async Task RollbackToSnapshotAsync(Guid snapId) {
-            var snapshot = await _repo.GetSnapshotAsync(snapId);
-            if (snapshot == null)
-                throw new KeyNotFoundException("Snapshot not found.");
-
-            var (chain, mempool) = snapshot.ToDomain();
-
-            _state.ClearChainAndMempool();
-            _state.ReplaceChain(chain);
-
-            foreach (var tx in mempool)
-                _state.AddPendingTransaction(tx);
-
-            await _repo.RollbackToSnapshotAsync(snapshot);
-        }
-
-        // (Fork sẽ implement sau)
-        public Task<Guid> ForkFromSnapshotAsync(Guid snapId, string newChainName) {
-            throw new NotImplementedException();
-        }
-
-        // ================================
-        // QUERIES (ILedgerQueryService)
-        // ================================
-
-        public async Task<List<Block>> GetCurrentChainAsync() {
-            await Task.Yield();
-            return _state.Blocks.ToList();
-        }
-
-        public async Task<bool> ValidateChainAsync() {
-            await Task.Yield();
-
-            var chain = _state.Blocks;
-            return chain.Zip(chain.Skip(1), (prev, next) =>
-                next.PreviousHash == prev.Hash).All(x => x);
-        }
 
         public async Task<IEnumerable<BlockSearchResultDTO>> GetBlockSummariesAsync() {
             await Task.Yield();
@@ -116,14 +64,7 @@ namespace Application.Services {
                     PreviousHash = b.PreviousHash,
                     Timestamp = b.Timestamp,
                     MinerNote = b.MinerNote,
-                    MatchedTransactions = b.Transactions
-                        .Select(t => new TransactionDTO {
-                            Id = t.Id,
-                            Content = t.Content,
-                            Author = t.Author,
-                            Timestamp = t.Timestamp
-                        })
-                        .ToList()
+                    MatchedTransactions = b.Transactions.Select(t => t.ToDTO()).ToList()
                 })
                 .OrderByDescending(r => r.Timestamp);
         }
@@ -132,19 +73,13 @@ namespace Application.Services {
             await Task.Yield();
             keyword = keyword.ToLower();
 
-            var results = _state.Blocks
+            return _state.Blocks
                 .Select(block => {
                     var matchedTx = block.Transactions
                         .Where(t =>
                             t.Content.ToLower().Contains(keyword) ||
-                            t.Author.ToLower().Contains(keyword)
-                        )
-                        .Select(t => new TransactionDTO {
-                            Id = t.Id,
-                            Content = t.Content,
-                            Author = t.Author,
-                            Timestamp = t.Timestamp
-                        })
+                            t.Author.ToLower().Contains(keyword))
+                        .Select(t => t.ToDTO()) // convert đúng kiểu TransactionDTO
                         .ToList();
 
                     bool blockMatched =
@@ -167,11 +102,104 @@ namespace Application.Services {
                 .OrderByDescending(r =>
                     r.MatchedTransactions
                         .OrderByDescending(t => t.Timestamp)
-                        .FirstOrDefault()?.Timestamp
-                )
+                        .FirstOrDefault()?.Timestamp)
                 .ToList();
-
-            return results;
         }
+
+
+        //Snapshot
+        public async Task<SnapshotDTO> CreateSnapshotAsync(string description) {
+            var chain = _state.Blocks.ToList();
+            var mempool = _state.PendingTransactions.ToList();
+
+            return await _repo.CreateSnapshotAsync(description, chain, mempool);
+        }
+
+        public async Task RollbackToSnapshotAsync(Guid snapId) {
+            var snapshot = await _repo.GetSnapshotAsync(snapId);
+            if (snapshot == null)
+                throw new KeyNotFoundException("Snapshot not found.");
+
+            var (chain, mempool) = snapshot.ToDomain();
+
+            //Xóa trạng thái hiện tại và thay thế
+            _state.ClearChainAndMempool();
+            _state.ReplaceChain(chain);
+
+            foreach (var tx in mempool)
+                _state.AddPendingTransaction(tx);
+
+            await _repo.RollbackToSnapshotAsync(snapshot);
+        }
+
+            //Fork timeline (chưa hoàn thiện)
+        public Task<Guid> ForkFromSnapshotAsync(Guid snapId, string newChainName) {
+            throw new NotImplementedException();
+        }
+
+        //Transaction
+        public async Task AddTransactionAsync(Transaction transaction) {
+            await Task.Yield();
+            _state.AddPendingTransaction(transaction);
+        }
+
+        public async Task<Transaction> UpdateTransactionAsync(UpdateTransactionRequestDTO request) {
+            await Task.Yield();
+
+            // 1) Tìm trong mempool
+            var tx = _state.PendingTransactions.FirstOrDefault(t => t.Id == request.Id);
+            if (tx is not null) {
+                tx.Content = request.Content.Trim();
+                tx.Author = request.Author.Trim();
+                tx.Timestamp = DateTime.UtcNow; // nếu muốn stamp thời điểm chỉnh sửa
+                return tx;
+            }
+
+            // 2) Không ở mempool → kiểm tra chain
+            var existsInBlock = _state.Blocks
+                .SelectMany(b => b.Transactions)
+                .Any(t => t.Id == request.Id);
+
+            if (existsInBlock)
+                throw new InvalidOperationException("Transaction has been mined. Update is not allowed.");
+
+            throw new KeyNotFoundException("Transaction not found.");
+        }
+        public async Task DeleteTransactionAsync(Guid id) {
+            await Task.Yield();
+
+            // 1) Thử xoá khỏi mempool
+            var removed = _state.PendingTransactions.RemoveAll(t => t.Id == id) > 0;
+            if (removed) return;
+
+            // 2) Không ở mempool → kiểm tra chain
+            var existsInBlock = _state.Blocks
+                .SelectMany(b => b.Transactions)
+                .Any(t => t.Id == id);
+
+            if (existsInBlock)
+                throw new InvalidOperationException("Transaction has been mined. Delete is not allowed.");
+
+            throw new KeyNotFoundException("Transaction not found.");
+        }
+
+
+        //Chain
+        public async Task<List<Block>> GetCurrentChainAsync() {
+            var dbChain = await _repo.GetCurrentChainAsync();
+            _state.ReplaceChain(dbChain);
+            return dbChain.ToList();
+        }
+
+        public async Task<bool> ValidateChainAsync() {
+            await Task.Yield();
+
+            var chain = _state.Blocks;
+            return chain.Zip(chain.Skip(1),
+                (prev, next) => next.PreviousHash == prev.Hash)
+                .All(x => x);
+        }
+
+        
     }
 }

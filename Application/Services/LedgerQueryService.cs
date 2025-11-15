@@ -1,93 +1,59 @@
-﻿using Application.DTOs;
-using Application.DTOs.Ledger;
-using Application.IRepositories;
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Application.DTOs.Blocks;
 using Application.IServices;
+using Application.Mappings;
+using Application.State;
 using Domain.Entities;
 
 namespace Application.Services {
     public class LedgerQueryService : ILedgerQueryService {
-        private readonly ILedgerRepository _ledgerRepository;
+        private readonly BlockchainState _state;
 
-        public LedgerQueryService(ILedgerRepository ledgerRepository) {
-            _ledgerRepository = ledgerRepository;
+        public LedgerQueryService(BlockchainState state) {
+            _state = state;
         }
 
-        public async Task<IEnumerable<BlockSearchResultDTO>> SearchBlocksAsync(string keyword) {
-            keyword = keyword.ToLower();
-
-            var chain = await _ledgerRepository.GetCurrentChainAsync();
-
-            var results = chain
-                .Select(block => {
-                    var matchedTx = block.Transactions
-                        .Where(t =>
-                            t.Content.ToLower().Contains(keyword) ||
-                            t.Author.ToLower().Contains(keyword)
-                        )
-                        .Select(t => new TransactionDTO {
-                            Id = t.Id,
-                            Content = t.Content,
-                            Author = t.Author,
-                            Timestamp = t.Timestamp
-                        })
-                        .ToList();
-
-                    bool blockMatched =
-                        block.Hash.ToLower().Contains(keyword) ||
-                        block.MinerNote.ToLower().Contains(keyword);
-
-                    if (!blockMatched && matchedTx.Count == 0)
-                        return null;
-
-                    return new BlockSearchResultDTO {
-                        Hash = block.Hash,
-                        PreviousHash = block.PreviousHash,
-                        Timestamp = block.Timestamp,
-                        MinerNote = block.MinerNote,
-                        MatchedTransactions = matchedTx
-                    };
-                })
-                .Where(r => r != null)
-                .Select(r => r!)
-                .OrderByDescending(r =>
-                    r.MatchedTransactions
-                        .OrderByDescending(t => t.Timestamp)
-                        .FirstOrDefault()?.Timestamp
-                )
+        public async Task<List<BlockDetailDTO>> GetCurrentChainAsync() {
+            await Task.Yield();
+            return _state.Blocks
+                .Select(b => b.ToDTO())
                 .ToList();
-
-            return results;
         }
 
         public async Task<IEnumerable<BlockSearchResultDTO>> GetBlockSummariesAsync() {
-            var chain = await _ledgerRepository.GetCurrentChainAsync();
-
-            return chain
-                .Select(b => new BlockSearchResultDTO {
-                    Hash = b.Hash,
-                    PreviousHash = b.PreviousHash,
-                    Timestamp = b.Timestamp,
-                    MinerNote = b.MinerNote,
-                    MatchedTransactions = b.Transactions
-                        .Select(t => new TransactionDTO {
-                            Id = t.Id,
-                            Content = t.Content,
-                            Author = t.Author,
-                            Timestamp = t.Timestamp
-                        })
-                        .ToList()
-                })
-                .OrderByDescending(r => r.Timestamp);
+            await Task.Yield();
+            return _state.Blocks
+                .Select(b => b.ToSearchResult());
         }
 
         public async Task<bool> ValidateChainAsync() {
-            var chain = await _ledgerRepository.GetCurrentChainAsync();
-
-            return chain.Zip(chain.Skip(1), (prev, next) =>
-                next.PreviousHash == prev.Hash).All(x => x);
+            await Task.Yield();
+            var chain = _state.Blocks;
+            return chain.Zip(chain.Skip(1),
+                (prev, next) => next.PreviousHash == prev.Hash).All(x => x);
         }
 
-        public Task<List<Block>> GetCurrentChainAsync()
-            => _ledgerRepository.GetCurrentChainAsync();
+        public async Task<IEnumerable<BlockSearchResultDTO>> SearchBlocksAsync(string keyword) {
+            await Task.Yield();
+            keyword = keyword.ToLower();
+
+            return _state.Blocks
+                .Select(b => b.ToSearchResult())
+                .Where(r =>
+                    r.Hash.ToLower().Contains(keyword) ||
+                    r.MinerNote.ToLower().Contains(keyword) ||
+                    r.MatchedTransactions.Any(t =>
+                        t.Content.ToLower().Contains(keyword) ||
+                        t.Author.ToLower().Contains(keyword)))
+                .ToList();
+        }
+
+        public async Task<BlockDetailDTO?> GetBlockDetailAsync(string hash) {
+            await Task.Yield();
+            var block = _state.Blocks.FirstOrDefault(b => b.Hash == hash);
+            return block?.ToDTO();
+        }
     }
 }

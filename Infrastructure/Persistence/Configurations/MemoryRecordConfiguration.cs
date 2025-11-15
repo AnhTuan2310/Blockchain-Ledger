@@ -16,7 +16,7 @@ namespace Infrastructure.Persistence.Configurations {
                 .HasColumnName("description")
                 .HasMaxLength(300);
 
-            builder.HasIndex(m => m.SnapshotTime);
+            builder.HasIndex(m => m.CreatedAt);
 
             builder.Property(m => m.ChainStateJson)
                 .HasColumnName("chain_state_json")

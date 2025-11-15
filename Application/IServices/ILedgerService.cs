@@ -1,13 +1,14 @@
-﻿using Application.DTOs.Ledger;
+﻿using Application.DTOs.Snapshot;
 using Domain.Entities;
 
 namespace Application.IServices {
     public interface ILedgerService {
-        Task AddTransactionAsync(Transaction tran);
-        Task<Block> MineBlockAsync(string minerNote);
-        Task<SnapshotDTO> CreateSnapshotAsync(string description);
-        Task RollbackToSnapshotAsync(Guid snapId);
-        Task<List<Block>> GetCurrentChainAsync();
+        Task AddTransactionAsync(Transaction transaction);
+        Task<Block> MineBlockAsync(string minerNote);         
 
+        // Snapshots (đang có sẵn)
+        Task<SnapshotDTO> CreateSnapshotAsync(string description);
+        Task RollbackToSnapshotAsync(Guid snapshotId);
+        Task<Guid> ForkFromSnapshotAsync(Guid snapshotId, string newChainName);
     }
 }

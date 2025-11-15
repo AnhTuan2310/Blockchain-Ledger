@@ -1,6 +1,5 @@
-﻿using Application.DTOs.Ledger;
+﻿using Application.DTOs.Snapshot;
 using Application.IRepositories;
-using Application.Mappings;
 using Domain.Entities;
 using Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -8,93 +7,64 @@ using System.Text.Json;
 
 namespace Infrastructure.Repositories {
     public class LedgerRepository : ILedgerRepository {
-        private readonly AppDbContext _db;
+        private readonly AppDbContext _context;
 
-        public LedgerRepository(AppDbContext db) {
-            _db = db;
+        public LedgerRepository(AppDbContext context) {
+            _context = context;
         }
 
-        //Lay chuoi Chain hien tai
+        public async Task AddBlockAsync(Block block) {
+            await _context.Blocks.AddAsync(block);
+            await _context.SaveChangesAsync();
+        }
+
         public async Task<List<Block>> GetCurrentChainAsync() {
-            return await _db.Blocks
+            return await _context.Blocks
                 .Include(b => b.Transactions)
                 .OrderBy(b => b.Timestamp)
                 .ToListAsync();
         }
-        public async Task AddBlockAsync(Block block) {
-            if (block == null) throw new ArgumentNullException(nameof(block));
 
-            await _db.Blocks.AddAsync(block);
-            await _db.SaveChangesAsync();
-        }
+        // ================================
+        // SNAPSHOT SUPPORT
+        // ================================
 
-        //Snapshot
-        // Tao snapshot va return SnapshotDTO
         public async Task<SnapshotDTO> CreateSnapshotAsync(string description, List<Block> chain, List<Transaction> mempool) {
-            var snapId = Guid.NewGuid();
-            var createdAt = DateTime.UtcNow;
-
-            var dto = new SnapshotDTO {
-                SnapshotId = snapId,
-                Description = description ?? string.Empty,
-                CreatedAt = createdAt,
-                Chain = chain.Select(b => b.ToDTO()).ToList(),
-                Mempool = mempool.Select(t => t.ToDTO()).ToList()
-            };
-
-            var json = JsonSerializer.Serialize(dto);
-
             var record = new MemoryRecord {
-                Id = snapId,
+                Id = Guid.NewGuid(),
+                CreatedAt = DateTime.Now,
                 Description = description,
-                SnapshotTime = createdAt,
-                ChainStateJson = json
+                ChainStateJson = JsonSerializer.Serialize(chain),
+                PendingTransactionsJson = JsonSerializer.Serialize(mempool)
             };
 
-            await _db.MemoryRecords.AddAsync(record);
-            await _db.SaveChangesAsync();
+            await _context.MemoryRecords.AddAsync(record);
+            await _context.SaveChangesAsync();
 
-            return dto;
+            return new SnapshotDTO {
+                Id = record.Id,
+                Description = record.Description,
+                CreatedAt = record.CreatedAt
+            };
         }
 
-        //Get snapshot theo Id
-        public async Task<SnapshotDTO?> GetSnapshotAsync(Guid snapshotId) {
-            var snap = await _db.MemoryRecords.FirstOrDefaultAsync(x => x.Id == snapshotId);
-            if (snap == null) return null;
-
-            var dto = JsonSerializer.Deserialize<SnapshotDTO>(snap.ChainStateJson);
-            return dto;
+        public async Task<MemoryRecord?> GetSnapshotAsync(Guid id) {
+            return await _context.MemoryRecords.FirstOrDefaultAsync(x => x.Id == id);
         }
-        //Thay the trang thai cua db bang snapshot
-        public async Task RollbackToSnapshotAsync(SnapshotDTO snapshotDto) {
-            if (snapshotDto == null) throw new ArgumentNullException(nameof(snapshotDto));
 
-            // Convert DTO sang Domain
-            var (chain, mempool) = snapshotDto.ToDomain();
+        public async Task RollbackToSnapshotAsync(MemoryRecord record) {
+            // Clear DB tables
+            _context.Blocks.RemoveRange(_context.Blocks);
+            _context.Transactions.RemoveRange(_context.Transactions);
 
-            _db.Transactions.RemoveRange(_db.Transactions);
-            _db.Blocks.RemoveRange(_db.Blocks);
-            await _db.SaveChangesAsync();
+            // Restore data
+            var restoredChain = JsonSerializer.Deserialize<List<Block>>(record.ChainStateJson) ?? new();
+            var restoredMempool = JsonSerializer.Deserialize<List<Transaction>>(record.PendingTransactionsJson) ?? new();
 
-            if (chain.Any()) {
-                await _db.Blocks.AddRangeAsync(chain);
-            }
+            await _context.Blocks.AddRangeAsync(restoredChain);
+            await _context.Transactions.AddRangeAsync(restoredMempool);
 
-            if (mempool.Any()) {
-                await _db.Transactions.AddRangeAsync(mempool);
-            }
-
-            await _db.SaveChangesAsync();
-        }
-        public async Task<List<SnapshotDTO>> GetSnapshotsAsync() {
-            var snaps = await _db.MemoryRecords
-                .OrderByDescending(m => m.SnapshotTime)
-                .ToListAsync();
-
-            return snaps
-                .Select(s => JsonSerializer.Deserialize<SnapshotDTO>(s.ChainStateJson)!)
-                .Where(x => x != null)
-                .ToList();
+            await _context.SaveChangesAsync();
         }
     }
 }

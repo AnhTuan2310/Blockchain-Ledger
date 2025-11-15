@@ -16,9 +16,8 @@ namespace Api.Controllers {
 
         [HttpGet]
         public async Task<IActionResult> GetChain() {
-            var chain = await _ledgerService.GetCurrentChainAsync();
+            var chain = await _ledgerQueryService.GetBlockSummariesAsync();
             return Ok(ApiResponse<object>.Success(chain, "Current blockchain loaded"));
-            //Trước kia là return Ok(chain);
         }
 
         [HttpGet("validate")]

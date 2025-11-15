@@ -24,7 +24,7 @@ namespace Infrastructure.Persistence.Configurations {
 
             builder.HasMany(b => b.Transactions)
                 .WithOne()
-                .HasForeignKey("block_hash")
+                .HasForeignKey(t => t.BlockHash)
                 .OnDelete(DeleteBehavior.Cascade);
         }
     }
